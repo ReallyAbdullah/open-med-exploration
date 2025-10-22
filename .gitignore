@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+# Generated visualization artifacts
+disease_drug_network.png
