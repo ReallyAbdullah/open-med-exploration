@@ -50,8 +50,10 @@ and a disease–drug knowledge graph.
   graph from de‑identified patient notes.  The script reads a CSV file of
   patient histories, uses the disease and pharmaceutical detection models to
   extract entities, records co‑occurrences of diseases and medications within
-  the same note and prints a summary of the most frequent associations.  This
-  provides a starting point for constructing a medical knowledge graph.
+  the same note and prints a summary of the most frequent associations.  The
+  updated exporter now adds weighted network analytics, a clearer static map
+  and an optional interactive HTML dashboard geared toward drug repurposing,
+  pharmacovigilance and treatment‑pathway exploration.
 
 * **`OpenMed_Research.md`** – A research note summarising the OpenMed
   model suite, architecture options, healthcare use cases and integration
@@ -148,13 +150,22 @@ credentials for your chosen LLM provider (OpenAI is used in the example).
 To generate a simple knowledge graph from de‑identified patient notes, run:
 
 ```bash
-python3 knowledge_graph_demo.py --file patient_notes.csv --sample-size 50
+python3 knowledge_graph_demo.py --file patient_notes.csv --sample-size 50 \
+    --min-weight 2 --output disease_drug_network.svg \
+    --html-output disease_drug_network.html
 ```
 
 This reads a random subset of notes from `patient_notes.csv`, extracts
 co‑occurring disease and drug entities and prints the most common
-associations.  You can adjust the sample size or point the script at a
-different CSV file as needed.
+associations.  The static SVG export now emphasises association strength and
+node prominence, while the interactive HTML view (requires `pip install pyvis`)
+reveals weighted degrees, top partners and the programme’s long‑term discovery
+goals.  You can adjust the sample size, thresholds or output paths to suit your
+dataset.  If you still prefer a PNG export for slide decks you can pass a
+`.png` path—the generated image is ignored by version control so branches no
+longer fail to merge on binary conflicts. Generate your own SVG/HTML artifacts
+locally for review; the repository no longer checks in example exports so
+branches stay lightweight.
 
 ## License
 
