@@ -1,12 +1,17 @@
 """Utilities for routing OpenMed models with resilient fallbacks."""
 
-from typing import Dict, Iterable, List, Tuple
+import os
+
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 from .contracts import ExtractionEntity
 
 
 def _import_openmed() -> Tuple:
     """Attempt to import OpenMed helpers, returning graceful fallbacks."""
+
+    if os.getenv("OPENMED_OFFLINE", "0").lower() in {"1", "true", "yes"}:
+        return None, None
 
     try:
         from openmed import analyze_text, get_model_suggestions
@@ -95,22 +100,64 @@ def suggest_models(text: str) -> List[str]:
     return _extend_with_specialty_models(text, models)
 
 
+def _coerce_entities(raw: Any) -> Sequence[ExtractionEntity]:
+    entities: List[ExtractionEntity] = []
+    if not raw:
+        return entities
+
+    candidate_items: Iterable[Any]
+    if hasattr(raw, "entities"):
+        candidate_items = getattr(raw, "entities")  # PredictionResult path
+    elif isinstance(raw, dict):
+        candidate_items = raw.get("entities") or raw.get("predictions") or []
+    else:
+        candidate_items = raw
+
+    for item in candidate_items or []:
+        if hasattr(item, "text"):
+            text = getattr(item, "text", "")
+            label = getattr(item, "label", "unknown")
+            confidence = float(getattr(item, "confidence", 0.0) or 0.0)
+        elif isinstance(item, dict):
+            text = item.get("entity") or item.get("text") or ""
+            label = item.get("type") or item.get("label") or "unknown"
+            confidence = float(item.get("confidence") or 0.0)
+        else:
+            continue
+
+        text = str(text).strip()
+        if not text:
+            continue
+        normalized = text.replace(" ", "")
+        if len(normalized) < 3:
+            continue
+
+        entities.append(
+            ExtractionEntity(
+                text=text,
+                type=str(label).lower(),
+                confidence=confidence,
+            )
+        )
+    return entities
+
+
 def run_models(text: str, models: List[str]) -> Dict[str, List[ExtractionEntity]]:
     results: Dict[str, List[ExtractionEntity]] = {}
     if default_analyze_text:
         for model in models:
             try:
-                output = default_analyze_text(text, models=[model]).get(model, [])
-            except Exception:
-                output = []
-            results[model] = [
-                ExtractionEntity(
-                    text=item.get("entity", ""),
-                    type=item.get("type", "unknown"),
-                    confidence=item.get("confidence", 0.0),
+                output = default_analyze_text(
+                    text,
+                    model_name=model,
+                    group_entities=True,
+                    confidence_threshold=0.5,
                 )
-                for item in output
-            ]
+            except Exception:
+                results[model] = []
+                continue
+
+            results[model] = list(_coerce_entities(output))
         return results
     synthetic = {
         "disease_detection_tiny": [

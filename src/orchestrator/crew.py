@@ -14,11 +14,21 @@ from .openmed_runner import run_models, suggest_models
 from .tasks import make_tasks
 
 try:
-    from crewai import Crew, Process
+    from crewai import Crew, LLM, Process
 
     CREW_AVAILABLE = True
 except Exception:  # pragma: no cover - fallback when CrewAI missing
     CREW_AVAILABLE = False
+    LLM = None  # type: ignore[assignment]
+
+
+def _manager_llm(model_name: str):
+    if LLM is None or not model_name:
+        return model_name
+    try:
+        return LLM(model=model_name)
+    except Exception:
+        return model_name
 
 
 def _merge_entities(raw_results: List[ExtractionEntity]) -> List[ExtractionEntity]:
@@ -99,7 +109,7 @@ def run_hierarchical(narrative: str, manager_llm: str = "gpt-4o"):
         ],
         tasks=list(tasks),
         process=Process.hierarchical,
-        manager_llm=manager_llm,
+        manager_llm=_manager_llm(manager_llm),
         verbose=True,
     )
 
