@@ -29,9 +29,12 @@ import logging
 import warnings
 from collections import Counter, defaultdict
 from typing import Dict, List, Tuple
+from pathlib import Path
 
 import pandas as pd
 import torch
+import networkx as nx
+import matplotlib.pyplot as plt
 
 # Suppress noisy logs from downstream libraries
 logging.getLogger("transformers").setLevel(logging.ERROR)
@@ -141,6 +144,105 @@ def build_association_graph(
     return associations
 
 
+def create_knowledge_graph(associations: Dict[str, Counter], min_weight: int = 1) -> nx.Graph:
+    """Create a NetworkX graph from disease-drug associations."""
+    G = nx.Graph()
+    
+    # Add nodes with different colors for diseases and drugs
+    diseases = set(associations.keys())
+    drugs = set(drug for counter in associations.values() for drug in counter.keys())
+    
+    for disease in diseases:
+        G.add_node(disease, node_type='disease')
+    for drug in drugs:
+        G.add_node(drug, node_type='drug')
+    
+    # Add edges with weights
+    for disease, counter in associations.items():
+        for drug, count in counter.items():
+            if count >= min_weight:
+                G.add_edge(disease, drug, weight=count)
+    
+    return G
+
+def visualize_and_save_graph(G: nx.Graph, output_path: str, title: str = "Disease-Drug Associations") -> None:
+    """Visualize and save the knowledge graph with improved layout and readability."""
+    plt.figure(figsize=(20, 16))
+    
+    # Create layout with more space and better separation
+    pos = nx.kamada_kawai_layout(G)
+    
+    # Prepare node lists by type
+    diseases = [node for node in G.nodes() if G.nodes[node].get('node_type') == 'disease']
+    drugs = [node for node in G.nodes() if G.nodes[node].get('node_type') == 'drug']
+    
+    # Calculate node sizes based on degree centrality
+    centrality = nx.degree_centrality(G)
+    disease_sizes = [3000 * centrality[node] + 2000 for node in diseases]
+    drug_sizes = [2000 * centrality[node] + 1500 for node in drugs]
+    
+    # Get edge weights and normalize them
+    edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
+    max_weight = max(edge_weights)
+    edge_widths = [1.5 * w/max_weight for w in edge_weights]
+    
+    # Set color scheme
+    disease_color = '#3498db'  # Blue
+    drug_color = '#2ecc71'     # Green
+    edge_color = '#bdc3c7'     # Light gray
+    
+    # Draw edges with curved lines
+    nx.draw_networkx_edges(G, pos, width=edge_widths, alpha=0.3, 
+                          edge_color=edge_color, style='solid')
+    
+    # Draw nodes
+    nx.draw_networkx_nodes(G, pos, nodelist=diseases, node_size=disease_sizes,
+                          node_color=disease_color, alpha=0.7, 
+                          node_shape='o', label='Diseases')
+    nx.draw_networkx_nodes(G, pos, nodelist=drugs, node_size=drug_sizes,
+                          node_color=drug_color, alpha=0.7, 
+                          node_shape='h', label='Drugs')
+    
+    # Add labels with better formatting
+    labels = {node: node if len(node) < 20 else node[:17] + '...' 
+             for node in G.nodes()}
+    
+    # Draw labels with white background for better readability
+    for node, (x, y) in pos.items():
+        plt.text(x, y, labels[node],
+                fontsize=8,
+                horizontalalignment='center',
+                verticalalignment='center',
+                bbox=dict(facecolor='white', 
+                         edgecolor='none',
+                         alpha=0.7,
+                         pad=2.0))
+    
+    plt.title(title, fontsize=16, pad=20)
+    plt.axis('off')
+    
+    # Add legend with more detail
+    legend_elements = [
+        plt.Line2D([0], [0], marker='o', color='w', label='Diseases',
+                  markerfacecolor=disease_color, markersize=15, alpha=0.7),
+        plt.Line2D([0], [0], marker='h', color='w', label='Drugs',
+                  markerfacecolor=drug_color, markersize=15, alpha=0.7),
+        plt.Line2D([0], [0], color=edge_color, label='Association',
+                  linewidth=2, alpha=0.5)
+    ]
+    plt.legend(handles=legend_elements, loc='upper right',
+              bbox_to_anchor=(1.15, 1), fontsize=12)
+    
+    # Add information about node sizes
+    plt.figtext(0.99, 0.02, 'Node size indicates connection strength\nLarger nodes have more connections',
+                ha='right', va='bottom', fontsize=10, alpha=0.7)
+    
+    # Save the graph with high quality
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', 
+                facecolor='white', edgecolor='none')
+    plt.close()
+
 def print_top_associations(associations: Dict[str, Counter], top_n: int = 5) -> None:
     """Print the top N drugs associated with each disease."""
     for disease, counter in associations.items():
@@ -168,13 +270,34 @@ def main() -> None:
         default=3,
         help="Number of top associated drugs to display per disease.",
     )
+    parser.add_argument(
+        "--min-weight",
+        type=int,
+        default=1,
+        help="Minimum number of co-occurrences required to include an edge in the graph visualization.",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="knowledge_graph.png",
+        help="Path to save the visualization image.",
+    )
     args = parser.parse_args()
 
     # Load the CSV.  We rely on pandas to handle quoting and delimiters.
     df = pd.read_csv(args.file)
     device = get_device()
     associations = build_association_graph(df, sample_size=args.sample_size, device=device)
+    
+    # Print associations
     print_top_associations(associations, top_n=args.top_n)
+    
+    # Create and save visualization
+    G = create_knowledge_graph(associations, min_weight=args.min_weight)
+    output_path = args.output
+    title = f"Disease-Drug Associations (min. weight: {args.min_weight})"
+    visualize_and_save_graph(G, output_path, title)
+    print(f"\nGraph visualization saved to: {output_path}")
 
 
 if __name__ == "__main__":

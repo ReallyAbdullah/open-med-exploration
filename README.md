@@ -1,4 +1,4 @@
-# Open Med Exploration
+# OpenMed Exploration
 
 This repository explores the use of **OpenMed** clinical language models for healthcare
 applications.  It contains scripts to inspect available models, analyze patient

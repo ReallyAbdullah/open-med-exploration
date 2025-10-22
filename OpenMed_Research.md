@@ -1,4 +1,31 @@
-# OpenMed Healthcare AI Research & Implementation Guide
+# OpenMed Integration Research
+
+## Overview
+
+This document captures research findings and implementation patterns for integrating OpenMed's clinical language models into production workflows.
+
+## Key Findings
+
+1. **Multi-Agent Architecture**
+   - Hierarchical workflow management
+   - Specialized agent roles
+   - CrewAI orchestration
+
+2. **Model Selection**
+   - Thompson sampling for routing
+   - Confidence-based selection
+   - Domain specialization
+
+3. **Entity Processing**
+   - SNOMED CT normalization
+   - RxNorm mapping
+   - Relationship extraction
+
+4. **Clinical Workflow**
+   - Structured intake
+   - Protocol planning
+   - Safety review
+   - FHIR output
 
 ## Table of Contents
 1. [Model Analysis](#model-analysis)
