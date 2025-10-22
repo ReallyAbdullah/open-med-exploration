@@ -34,6 +34,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import networkx as nx
 import pandas as pd
@@ -198,41 +199,149 @@ def _calculate_top_partners(graph: nx.Graph, limit: int = 5) -> Dict[str, List[T
         result[node] = neighbors[:limit]
     return result
 
+
+def _detect_communities(graph: nx.Graph) -> Dict[str, int]:
+    """Return a mapping of node -> community id using modularity clustering."""
+
+    if graph.number_of_nodes() < 3 or graph.number_of_edges() == 0:
+        return {}
+
+    communities = list(nx.algorithms.community.greedy_modularity_communities(graph))
+    if len(communities) <= 1:
+        return {}
+
+    community_map: Dict[str, int] = {}
+    for idx, community in enumerate(communities):
+        for node in community:
+            community_map[node] = idx
+    return community_map
+
+
+def _mix_colors(color_a: str, color_b: str, weight: float) -> Tuple[float, float, float, float]:
+    """Blend two colors together (0.0 -> color_b, 1.0 -> color_a)."""
+
+    weight = max(0.0, min(1.0, weight))
+    rgba_a = mcolors.to_rgba(color_a)
+    rgba_b = mcolors.to_rgba(color_b)
+    return tuple(weight * a + (1 - weight) * b for a, b in zip(rgba_a, rgba_b))
+
+
+def _prepare_edge_summary(graph: nx.Graph, limit: int = 8) -> List[Tuple[str, str, int]]:
+    """Return the strongest disease-drug associations."""
+
+    edges = sorted(
+        (
+            (u, v, int(data.get("weight", 0)))
+            for u, v, data in graph.edges(data=True)
+        ),
+        key=lambda triple: triple[2],
+        reverse=True,
+    )
+    return [(u, v, weight) for u, v, weight in edges[:limit]]
+
+
+def _build_hub_table_rows(
+    graph: nx.Graph, weighted_degree: Dict[str, float], limit: int = 5
+) -> List[List[str]]:
+    """Construct rows summarising the top disease and drug hubs."""
+
+    diseases = [node for node in graph.nodes if graph.nodes[node].get("node_type") == "disease"]
+    drugs = [node for node in graph.nodes if graph.nodes[node].get("node_type") == "drug"]
+
+    disease_hubs = sorted(diseases, key=lambda node: weighted_degree.get(node, 0), reverse=True)[:limit]
+    drug_hubs = sorted(drugs, key=lambda node: weighted_degree.get(node, 0), reverse=True)[:limit]
+
+    rows: List[List[str]] = []
+    for idx in range(max(len(disease_hubs), len(drug_hubs))):
+        disease = disease_hubs[idx] if idx < len(disease_hubs) else ""
+        drug = drug_hubs[idx] if idx < len(drug_hubs) else ""
+        disease_weight = f"{int(weighted_degree.get(disease, 0))}" if disease else ""
+        drug_weight = f"{int(weighted_degree.get(drug, 0))}" if drug else ""
+        rows.append([disease, disease_weight, drug, drug_weight])
+    return rows
+
+
+def _summarize_communities(
+    graph: nx.Graph,
+    community_map: Dict[str, int],
+    weighted_degree: Dict[str, float],
+) -> List[str]:
+    """Generate descriptive sentences about detected communities."""
+
+    if not community_map:
+        if graph.number_of_edges() == 0:
+            return ["No disease–drug edges met the visualisation threshold."]
+        return [
+            "A single dense module connects the sampled diseases and drugs – focus on the bar chart to prioritise next questions.",
+        ]
+
+    descriptions: List[str] = []
+    for community_id in sorted(set(community_map.values())):
+        members = [node for node, cid in community_map.items() if cid == community_id]
+        diseases = [node for node in members if graph.nodes[node].get("node_type") == "disease"]
+        drugs = [node for node in members if graph.nodes[node].get("node_type") == "drug"]
+
+        key_disease = max(diseases, key=lambda node: weighted_degree.get(node, 0)) if diseases else None
+        key_drug = max(drugs, key=lambda node: weighted_degree.get(node, 0)) if drugs else None
+
+        description = (
+            f"Community {community_id + 1}: {len(diseases)} disease(s) ↔ {len(drugs)} drug(s)."
+        )
+        if key_disease:
+            description += f" Hub disease: {key_disease}."
+        if key_drug:
+            description += f" Hub drug: {key_drug}."
+        descriptions.append(description)
+
+    return descriptions
+
 def visualize_and_save_graph(
     G: nx.Graph,
     output_path: str,
     title: str = "Disease-Drug Associations",
 ) -> None:
-    """Visualize and save the knowledge graph with improved layout and readability."""
+    """Visualize and save the knowledge graph with contextual summaries."""
 
     if G.number_of_nodes() == 0:
         logging.warning("The graph is empty. Skipping static export.")
         return
 
-    fig, ax = plt.subplots(figsize=(22, 16))
-
-    # Layout that separates diseases and drugs while remaining force-directed
-    pos = nx.spring_layout(G, k=1.2, seed=42, weight="weight")
-    _spread_bipartite_layers(G, pos)
+    weighted_degree = nx.get_node_attributes(G, "weighted_degree")
+    community_map = _detect_communities(G)
 
     diseases = [node for node in G.nodes if G.nodes[node].get("node_type") == "disease"]
     drugs = [node for node in G.nodes if G.nodes[node].get("node_type") == "drug"]
 
-    weighted_degree = nx.get_node_attributes(G, "weighted_degree")
     disease_sizes = _scale_values([weighted_degree.get(node, 0) for node in diseases], base=1600, spread=2600)
     drug_sizes = _scale_values([weighted_degree.get(node, 0) for node in drugs], base=1200, spread=2200)
 
     edge_weights = [G[u][v]["weight"] for u, v in G.edges]
     if edge_weights:
+        min_weight = min(edge_weights)
         max_weight = max(edge_weights)
-        edge_widths = [1.0 + 5.0 * (weight / max_weight) for weight in edge_weights]
-        edge_colors = [weight / max_weight for weight in edge_weights]
+        denom = max(max_weight - min_weight, 1)
+        edge_widths = [1.0 + 5.0 * ((weight - min_weight) / denom) for weight in edge_weights]
+        edge_colors = [(weight - min_weight) / denom for weight in edge_weights]
     else:
-        max_weight = 1
         edge_widths = []
         edge_colors = []
 
     cmap = plt.cm.get_cmap("YlGnBu")
+
+    fig = plt.figure(figsize=(24, 16))
+    grid = fig.add_gridspec(
+        nrows=2,
+        ncols=3,
+        width_ratios=[3.2, 3.2, 2.4],
+        height_ratios=[4.5, 2.0],
+        hspace=0.35,
+        wspace=0.32,
+    )
+
+    # Association network panel
+    ax_graph = fig.add_subplot(grid[0, :2])
+    pos = nx.spring_layout(G, k=1.2, seed=42, weight="weight")
+    _spread_bipartite_layers(G, pos)
 
     if edge_widths:
         nx.draw_networkx_edges(
@@ -242,46 +351,66 @@ def visualize_and_save_graph(
             edge_color=edge_colors,
             edge_cmap=cmap,
             alpha=0.55,
-            ax=ax,
+            ax=ax_graph,
         )
+
+    unique_communities = sorted(set(community_map.values())) if community_map else []
+    palette = plt.cm.get_cmap("tab20", max(len(unique_communities), 1))
+    community_colors = {cid: palette(idx) for idx, cid in enumerate(unique_communities)}
+
+    disease_colors = []
+    for node in diseases:
+        if community_map:
+            cid = community_map.get(node, 0)
+            community_color = community_colors.get(cid, palette(0))
+            disease_colors.append(_mix_colors(community_color, "#ffffff", 0.65))
+        else:
+            disease_colors.append(mcolors.to_rgba("#1f77b4", alpha=0.85))
+
+    drug_colors = []
+    for node in drugs:
+        if community_map:
+            cid = community_map.get(node, 0)
+            community_color = community_colors.get(cid, palette(0))
+            drug_colors.append(_mix_colors(community_color, "#27ae60", 0.75))
+        else:
+            drug_colors.append(mcolors.to_rgba("#2ecc71", alpha=0.85))
 
     nx.draw_networkx_nodes(
         G,
         pos,
         nodelist=diseases,
         node_size=disease_sizes,
-        node_color="#1f77b4",
-        alpha=0.85,
+        node_color=disease_colors,
         node_shape="o",
         label="Diseases",
-        ax=ax,
+        ax=ax_graph,
     )
     nx.draw_networkx_nodes(
         G,
         pos,
         nodelist=drugs,
         node_size=drug_sizes,
-        node_color="#2ecc71",
-        alpha=0.85,
+        node_color=drug_colors,
         node_shape="h",
         label="Drugs",
-        ax=ax,
+        ax=ax_graph,
     )
 
     labels = _format_labels(G.nodes, max_length=28)
     for node, (x, y) in pos.items():
-        ax.text(
+        ax_graph.text(
             x,
             y,
             labels[node],
             fontsize=9,
             horizontalalignment="center",
             verticalalignment="center",
-            bbox=dict(facecolor="white", edgecolor="none", alpha=0.8, pad=2.4),
+            bbox=dict(facecolor="white", edgecolor="none", alpha=0.8, pad=2.2),
         )
 
-    ax.set_title(title, fontsize=20, pad=24)
-    ax.axis("off")
+    ax_graph.set_title("Association network", fontsize=18, pad=18)
+    ax_graph.axis("off")
 
     legend_elements = [
         plt.Line2D(
@@ -291,8 +420,8 @@ def visualize_and_save_graph(
             color="w",
             label="Diseases",
             markerfacecolor="#1f77b4",
-            markersize=16,
-            alpha=0.85,
+            markersize=14,
+            alpha=0.9,
         ),
         plt.Line2D(
             [0],
@@ -301,8 +430,8 @@ def visualize_and_save_graph(
             color="w",
             label="Drugs",
             markerfacecolor="#2ecc71",
-            markersize=16,
-            alpha=0.85,
+            markersize=14,
+            alpha=0.9,
         ),
         plt.Line2D(
             [0],
@@ -312,28 +441,85 @@ def visualize_and_save_graph(
             linewidth=3,
         ),
     ]
-    ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.2, 1.0), fontsize=12)
+    ax_graph.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.18, 1.02), fontsize=11)
 
-    fig.text(
-        0.01,
-        0.01,
-        "Node size ∝ weighted connections. Highlight dense subgraphs for repurposing, safety and pathway insights.",
-        ha="left",
-        va="bottom",
-        fontsize=11,
-        alpha=0.75,
-    )
+    # Top association bar chart
+    ax_bar = fig.add_subplot(grid[0, 2])
+    top_edges = _prepare_edge_summary(G)
+    if top_edges:
+        labels_bar = [f"{u} ↔ {v}" for u, v, _ in top_edges][::-1]
+        weights_bar = [weight for _, _, weight in top_edges][::-1]
+        y_positions = range(len(labels_bar))
+        bars = ax_bar.barh(y_positions, weights_bar, color="#34495e", alpha=0.85)
+        ax_bar.set_yticks(y_positions, labels_bar, fontsize=10)
+        ax_bar.invert_yaxis()
+        ax_bar.set_xlabel("Co-mentions", fontsize=11)
+        ax_bar.set_title("Most frequent co-mentions", fontsize=15)
+        for bar, weight in zip(bars, weights_bar):
+            ax_bar.text(
+                bar.get_width() + max(weights_bar) * 0.01,
+                bar.get_y() + bar.get_height() / 2,
+                str(weight),
+                va="center",
+                fontsize=9,
+            )
+    else:
+        ax_bar.text(0.5, 0.5, "No edges above threshold", ha="center", va="center", fontsize=12)
+    ax_bar.spines["top"].set_visible(False)
+    ax_bar.spines["right"].set_visible(False)
+
+    # Hub summary table
+    ax_table = fig.add_subplot(grid[1, :2])
+    ax_table.axis("off")
+    table_rows = _build_hub_table_rows(G, weighted_degree)
+    if table_rows:
+        table = ax_table.table(
+            cellText=table_rows,
+            colLabels=["Disease hub", "Total co-mentions", "Drug hub", "Total co-mentions"],
+            loc="center",
+            cellLoc="left",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(11)
+        table.scale(1.0, 1.4)
+        ax_table.set_title("Top weighted hubs", fontsize=15, pad=12)
+    else:
+        ax_table.text(0.5, 0.5, "Insufficient data for hub summary", ha="center", va="center", fontsize=12)
+
+    # Community insight annotations
+    ax_notes = fig.add_subplot(grid[1, 2])
+    ax_notes.axis("off")
+    community_sentences = _summarize_communities(G, community_map, weighted_degree)
+    guidance = [
+        "How to read:",
+        "• Node size ∝ weighted associations",
+        "• Shapes distinguish diseases vs drugs",
+        "• Bar chart pinpoints pairs to investigate",
+    ]
+    y = 0.98
+    ax_notes.text(0.0, y, "Insights", fontsize=15, fontweight="bold", transform=ax_notes.transAxes)
+    y -= 0.08
+    for line in guidance:
+        ax_notes.text(0.02, y, line, fontsize=11, transform=ax_notes.transAxes)
+        y -= 0.07
+    y -= 0.04
+    ax_notes.text(0.0, y, "Community focus", fontsize=13, fontweight="bold", transform=ax_notes.transAxes)
+    y -= 0.08
+    for sentence in community_sentences:
+        ax_notes.text(0.02, y, f"• {sentence}", fontsize=11, transform=ax_notes.transAxes)
+        y -= 0.08
 
     if edge_colors:
         sm = plt.cm.ScalarMappable(
             cmap=cmap,
-            norm=plt.Normalize(vmin=min(edge_colors), vmax=max(edge_colors)),
+            norm=plt.Normalize(vmin=0, vmax=1),
         )
         sm.set_array([])
-        cbar = fig.colorbar(sm, ax=ax, shrink=0.65, pad=0.02)
+        cbar = fig.colorbar(sm, ax=ax_graph, shrink=0.7, pad=0.015)
         cbar.set_label("Relative association strength", rotation=270, labelpad=18)
 
-    fig.tight_layout()
+    fig.suptitle(title, fontsize=22, y=0.99)
+    fig.tight_layout(rect=[0, 0.01, 1, 0.97])
     fig.savefig(output_path, dpi=350, bbox_inches="tight", facecolor="white", edgecolor="none")
     plt.close(fig)
 
