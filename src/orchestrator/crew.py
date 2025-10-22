@@ -79,6 +79,7 @@ def _fallback_pipeline(narrative: str):
 
 def run_hierarchical(narrative: str, manager_llm: str = "gpt-4o"):
     if not CREW_AVAILABLE:
+        print("Falling back ...")
         return _fallback_pipeline(narrative)
 
     intake_agent = make_intake_agent()
