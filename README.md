@@ -41,6 +41,10 @@ and a disease–drug knowledge graph.
   determine which models to call, executes each suggested model in turn and
   prints a summary of the detected entities with their confidence scores.  See
   the script’s built‑in example or provide your own text at the command line.
+* **`src/orchestrator/cli.py`** – Entry point for the IBS digital‑therapeutic
+  orchestrator.  It can run in a fully local fallback mode or, when CrewAI and
+  an LLM provider are configured, execute the hierarchical multi‑agent flow
+  described in the build plan.
 
 * **`knowledge_graph_demo.py`** – Builds a disease–drug association
   graph from de‑identified patient notes.  The script reads a CSV file of
@@ -64,6 +68,36 @@ python3 multi_agent_pipeline.py "Patient diagnosed with acute lymphoblastic leuk
 
 The script will automatically determine which OpenMed models are appropriate
 for the text, run them and print the detected entities grouped by model.
+
+## IBS digital‑therapeutic orchestrator
+
+The orchestrator wraps HIPAA Safe Harbor redaction, OpenMed model routing,
+terminology normalization and FHIR bundling into a single command‑line tool.
+It can execute purely with the repository’s local fallback logic, or—if you
+install the optional dependencies—it will run the full CrewAI hierarchical
+workflow.
+
+1. (Optional) Create a virtual environment and install the extended
+   dependencies:
+
+   ```bash
+   python -m venv .venv && source .venv/bin/activate
+   pip install crewai openmed pydantic==2.* rich python-dotenv
+   ```
+
+2. Run the orchestrator against a patient narrative.  The command below uses
+   the module path so it works from the repository root:
+
+   ```bash
+   python -m src.orchestrator.cli --text "IBS symptoms with abdominal pain and bloating; tried peppermint oil; on omeprazole; anxiety present."
+   ```
+
+   By default this uses the local fallback pipeline, which still produces
+   structured intake data, merged entities, a protocol plan, a Markdown
+   summary and a minimal FHIR bundle preview.  To enable CrewAI’s hierarchical
+   manager, install the optional dependencies above and supply a supported
+   `--manager-llm` or configure your provider credentials (for example via
+   `OPENAI_API_KEY`).
 
 ## Building a disease–drug knowledge graph
 
