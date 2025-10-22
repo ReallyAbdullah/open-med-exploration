@@ -41,6 +41,10 @@ and a disease–drug knowledge graph.
   determine which models to call, executes each suggested model in turn and
   prints a summary of the detected entities with their confidence scores.  See
   the script’s built‑in example or provide your own text at the command line.
+* **`src/orchestrator/cli.py`** – Entry point for the IBS digital‑therapeutic
+  orchestrator.  It can run in a fully local fallback mode or, when CrewAI and
+  an LLM provider are configured, execute the hierarchical multi‑agent flow
+  described in the build plan.
 
 * **`knowledge_graph_demo.py`** – Builds a disease–drug association
   graph from de‑identified patient notes.  The script reads a CSV file of
@@ -64,6 +68,80 @@ python3 multi_agent_pipeline.py "Patient diagnosed with acute lymphoblastic leuk
 
 The script will automatically determine which OpenMed models are appropriate
 for the text, run them and print the detected entities grouped by model.
+
+## IBS digital‑therapeutic orchestrator
+
+The orchestrator wraps HIPAA Safe Harbor redaction, OpenMed model routing,
+terminology normalization and FHIR bundling into a single command‑line tool.
+It can execute purely with the repository’s local fallback logic, or—if you
+install the optional dependencies—it will run the full CrewAI hierarchical
+workflow.
+
+1. (Optional) Create a virtual environment and install the extended
+   dependencies:
+
+   ```bash
+   python -m venv .venv && source .venv/bin/activate
+   pip install crewai openmed pydantic==2.* rich python-dotenv
+   ```
+
+2. Run the orchestrator against a patient narrative.  The command below uses
+   the module path so it works from the repository root:
+
+   ```bash
+   python -m src.orchestrator.cli --text "IBS symptoms with abdominal pain and bloating; tried peppermint oil; on omeprazole; anxiety present."
+   ```
+
+   By default this uses the local fallback pipeline, which still produces
+   structured intake data, merged entities, a protocol plan, a Markdown
+   summary and a minimal FHIR bundle preview.  To enable CrewAI’s hierarchical
+   manager, install the optional dependencies above and supply a supported
+   `--manager-llm` or configure your provider credentials (for example via
+   `OPENAI_API_KEY`).
+
+### End-to-end CrewAI example
+
+To run the full hierarchical workflow with live OpenMed models and CrewAI
+agents, follow the steps below.  This assumes you have network access and
+credentials for your chosen LLM provider (OpenAI is used in the example).
+
+1. Install the extended dependencies inside a virtual environment:
+
+   ```bash
+   python -m venv .venv && source .venv/bin/activate
+   pip install crewai openmed pydantic==2.* rich python-dotenv
+   ```
+
+2. Export the credentials required by CrewAI and OpenMed.  At minimum you need
+   an API key for your LLM provider.  If you want to call authenticated OpenMed
+   endpoints, export those variables too.
+
+   ```bash
+   export OPENAI_API_KEY="sk-..."
+   # export OPENMED_API_KEY="..."           # only if your deployment requires it
+   ```
+
+3. Invoke the orchestrator with a realistic patient narrative and specify the
+   CrewAI manager model you want to use (for example, `gpt-4o`).
+
+   ```bash
+   python -m src.orchestrator.cli \
+     --manager-llm gpt-4o \
+     --text "Patient reports 6 months of abdominal pain, diarrhea, and bloating. Currently taking omeprazole and peppermint oil capsules. Sleep disruption and anxiety noted."
+   ```
+
+4. Inspect the outputs:
+
+   * The CLI prints a structured JSON-like dictionary containing the intake
+     assessment, merged entities (with SNOMED/RxNorm mappings when available),
+     and the selected therapeutic protocol with safety flags.
+   * A Markdown summary is emitted, suitable for pasting into a clinical note.
+   * A FHIR bundle preview is printed so you can verify downstream EHR payloads.
+
+   When CrewAI is active, you will also see verbose logs that trace the
+   hierarchical manager’s decisions, the agents assigned to each task, and any
+   guardrail retries.  This makes it easy to validate that the multi-agent flow
+   is functioning end to end.
 
 ## Building a disease–drug knowledge graph
 
