@@ -99,6 +99,50 @@ workflow.
    `--manager-llm` or configure your provider credentials (for example via
    `OPENAI_API_KEY`).
 
+### End-to-end CrewAI example
+
+To run the full hierarchical workflow with live OpenMed models and CrewAI
+agents, follow the steps below.  This assumes you have network access and
+credentials for your chosen LLM provider (OpenAI is used in the example).
+
+1. Install the extended dependencies inside a virtual environment:
+
+   ```bash
+   python -m venv .venv && source .venv/bin/activate
+   pip install crewai openmed pydantic==2.* rich python-dotenv
+   ```
+
+2. Export the credentials required by CrewAI and OpenMed.  At minimum you need
+   an API key for your LLM provider.  If you want to call authenticated OpenMed
+   endpoints, export those variables too.
+
+   ```bash
+   export OPENAI_API_KEY="sk-..."
+   # export OPENMED_API_KEY="..."           # only if your deployment requires it
+   ```
+
+3. Invoke the orchestrator with a realistic patient narrative and specify the
+   CrewAI manager model you want to use (for example, `gpt-4o`).
+
+   ```bash
+   python -m src.orchestrator.cli \
+     --manager-llm gpt-4o \
+     --text "Patient reports 6 months of abdominal pain, diarrhea, and bloating. Currently taking omeprazole and peppermint oil capsules. Sleep disruption and anxiety noted."
+   ```
+
+4. Inspect the outputs:
+
+   * The CLI prints a structured JSON-like dictionary containing the intake
+     assessment, merged entities (with SNOMED/RxNorm mappings when available),
+     and the selected therapeutic protocol with safety flags.
+   * A Markdown summary is emitted, suitable for pasting into a clinical note.
+   * A FHIR bundle preview is printed so you can verify downstream EHR payloads.
+
+   When CrewAI is active, you will also see verbose logs that trace the
+   hierarchical manager’s decisions, the agents assigned to each task, and any
+   guardrail retries.  This makes it easy to validate that the multi-agent flow
+   is functioning end to end.
+
 ## Building a disease–drug knowledge graph
 
 To generate a simple knowledge graph from de‑identified patient notes, run:
