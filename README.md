@@ -155,6 +155,14 @@ python3 knowledge_graph_demo.py --file patient_notes.csv --sample-size 50 \
     --html-output disease_drug_network.html
 ```
 
+### Example
+
+<img width="1306" height="1438" alt="Screenshot 2025-10-25 at 10 07 03 am" src="https://github.com/user-attachments/assets/743f0d38-b2d9-445e-8c56-4ee5c3011fc1" />
+
+
+
+
+
 This reads a random subset of notes from `patient_notes.csv`, extracts
 co‑occurring disease and drug entities and prints the most common
 associations.  The static SVG export now emphasises association strength and
